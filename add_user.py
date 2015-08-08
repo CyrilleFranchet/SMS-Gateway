@@ -8,8 +8,6 @@ import sys
 
 from user import *
 
-DB_PATH = '/mnt/hgfs/sas/sources/sms-gateway/src/sms.db'
-
 if __name__ == '__main__':
     if len(sys.argv) != 2:
         print 'please enter user name'

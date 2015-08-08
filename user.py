@@ -2,6 +2,8 @@
 import sqlobject
 import binascii
 import os
+import hashlib
+DB_PATH = os.path.dirname(os.path.abspath(__file__)) + '/sms.db'
 
 class User(sqlobject.SQLObject):
     # id is implicit

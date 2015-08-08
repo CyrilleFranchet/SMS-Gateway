@@ -13,8 +13,6 @@ from sms import *
 from user import *
 from modem import *
 
-DB_PATH = './sms.db'
-
 # Define the API endpoints here
 def auth(dict_query):
     param_username = dict_query['username'][0]
@@ -140,12 +138,12 @@ if __name__ == '__main__':
         '/api/auth' : ('username', 'password'),
         '/api/send' : ('token', 'number', 'message')
     }
-    
+
     fifo = Queue.Queue(10)
     modem = Modem('1234')
     thread_modem = threading.Thread(name='modem', target=modem.run)
     thread_modem.start()
-    server = ThreadedHTTPServer(('127.0.0.1',8080), RequestHandler, dict_endpoints)
+    server = ThreadedHTTPServer(('192.168.2.9',8080), RequestHandler, dict_endpoints)
     print 'starting core HTTP server'
     server.serve_forever()
 
