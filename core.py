@@ -13,7 +13,7 @@ from sms import *
 from user import *
 from modem import *
 
-DB_PATH = '/mnt/hgfs/sas/sources/sms-gateway/src/sms.db'
+DB_PATH = './sms.db'
 
 # Define the API endpoints here
 def auth(dict_query):
