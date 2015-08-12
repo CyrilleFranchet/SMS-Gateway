@@ -3,10 +3,11 @@
 This Python program is designed to be used on a Raspberry Pi to send SMS through Siemens TC35 modem board (http://www.amazon.fr/SainSmart-Compatible-Siemens-Wireless-Adaptateur/dp/B006CHEUSI/ref=sr_1_2?ie=UTF8&qid=1439062709&sr=8-2&keywords=siemens+gsm).
 
 Python Dependencies :
-python >= 2.7.8 (pbkdf2_hmac support in hashlib)
-sqlobject
-phonenumbers
-RPi.GPIO
+  - python >= 2.7.8 (pbkdf2_hmac support in hashlib)
+  - sqlobject
+  - phonenumbers
+  - RPi.GPIO
+  - pyserial
 
  TO DO:
   - finalize the core module which is used to send SMS through API

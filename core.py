@@ -6,19 +6,20 @@ import phonenumbers
 import json
 import hashlib
 import datetime
-import Queue
 import threading
+import Queue
 
 from sms import *
 from user import *
 from modem import *
+from global_var import *
 
 # Define the API endpoints here
 def auth(dict_query):
     param_username = dict_query['username'][0]
     param_password = dict_query['password'][0]
     sqlobject.sqlhub.processConnection = sqlobject.connectionForURI('sqlite://'+DB_PATH)
-    User._connection.debug = True 
+    if debug: User._connection.debug = True 
     # We need to create the tables
     User.createTable(ifNotExists=True)
     
@@ -54,7 +55,7 @@ def send(dict_query):
     param_token = dict_query['token'][0]
     param_message = dict_query['message'][0]
     sqlobject.sqlhub.processConnection = sqlobject.connectionForURI('sqlite://'+DB_PATH)
-    User._connection.debug = True 
+    if debug: User._connection.debug = True 
     try:
         obj_number = phonenumbers.parse(param_number, 'FR')
     except phonenumbers.NumberParseException as npe:
@@ -73,10 +74,19 @@ def send(dict_query):
         db_user = user_object.getOne()
         if db_user.expirationDate > datetime.datetime.now():
             # Token is valid
-            new_sms = SMS(formated_number, param_message)
-            fifo.put(new_sms)
-            print fifo.get()
-            response = json.dumps({'response' : {'status' : 'success'}}, indent=4)
+            try:
+                temp_fifo = Queue.Queue(1)
+                new_sms = SMS(formated_number, param_message, temp_fifo)
+                fifo.put(new_sms, True, 5)
+                fifo.join()
+                modem_response = temp_fifo.get(True, 5)
+                temp_fifo.task_done()
+                response = json.dumps({'response' : {'status' : 'success'}}, indent=4)
+            except Full as error:
+                response = json.dumps({'response' : {'status' : 'failed', 'reason' : 'modem thread didn\'t respond'}}, indent=4)
+        else:
+            response = json.dumps({'response' : {'status' : 'failed', 'reason' : 'expired token'}}, indent=4)
+
     except sqlobject.SQLObjectIntegrityError as error:
         # We should not have more than one object returned
         response = json.dumps({'response' : {'status' : 'failed', 'reason' : 'SQLi detected'}}, indent=4)
@@ -136,14 +146,21 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 if __name__ == '__main__':
     dict_endpoints = {
         '/api/auth' : ('username', 'password'),
-        '/api/send' : ('token', 'number', 'message')
+        '/api/send' : ('token', 'number', 'message'),
+        '/api/jobs' : ('token', 'id')
     }
 
-    fifo = Queue.Queue(10)
     modem = Modem('1234')
-    thread_modem = threading.Thread(name='modem', target=modem.run)
-    thread_modem.start()
+    fifo = modem.getFifo()
+    modem.start()
     server = ThreadedHTTPServer(('192.168.2.9',8080), RequestHandler, dict_endpoints)
-    print 'starting core HTTP server'
-    server.serve_forever()
-
+    try:
+        if debug: print 'Starting API web server'
+        server.serve_forever()
+    except KeyboardInterrupt:
+        if debug: print 'Stopping modem'
+        modem.stop.set()
+        if debug: print 'Waiting for modem thread to terminate'
+        modem.join()
+    finally:
+        pass
