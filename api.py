@@ -7,11 +7,11 @@ import json
 import hashlib
 import datetime
 import threading
-import Queue
 
 from sms import *
 from user import *
 from modem import *
+from scheduler import *
 from global_var import *
 
 # Define the API endpoints here
@@ -74,16 +74,9 @@ def send(dict_query):
         db_user = user_object.getOne()
         if db_user.expirationDate > datetime.datetime.now():
             # Token is valid
-            try:
-                temp_fifo = Queue.Queue(1)
-                new_sms = SMS(formated_number, param_message, temp_fifo)
-                fifo.put(new_sms, True, 5)
-                fifo.join()
-                modem_response = temp_fifo.get(True, 5)
-                temp_fifo.task_done()
-                response = json.dumps({'response' : {'status' : 'success'}}, indent=4)
-            except Full as error:
-                response = json.dumps({'response' : {'status' : 'failed', 'reason' : 'modem thread didn\'t respond'}}, indent=4)
+            # Add the job in the scheduler
+            print scheduler.SchedulerAddJob(db_user.login, formated_number, param_message)
+            response = json.dumps({'response' : {'status' : 'success'}}, indent=4)
         else:
             response = json.dumps({'response' : {'status' : 'failed', 'reason' : 'expired token'}}, indent=4)
 
@@ -153,6 +146,8 @@ if __name__ == '__main__':
     modem = Modem('1234')
     fifo = modem.getFifo()
     modem.start()
+    scheduler = Scheduler(fifo)
+    scheduler.start()
     server = ThreadedHTTPServer(('192.168.2.9',8080), RequestHandler, dict_endpoints)
     try:
         if debug: print 'Starting API web server'
@@ -160,7 +155,11 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         if debug: print 'Stopping modem'
         modem.stop.set()
+        if debug: print 'Stopping scheduler'
+        scheduler.stop.set()
         if debug: print 'Waiting for modem thread to terminate'
         modem.join()
+        if debug: print 'Waiting for scheduler thread to terminate'
+        scheduler.join()
     finally:
         pass

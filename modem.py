@@ -20,12 +20,12 @@ class Modem(threading.Thread):
         GPIO.setup(7, GPIO.OUT)
         self.sr = serial.Serial('/dev/ttyAMA0', 9600, timeout=5)
         self.stop = threading.Event()
-        self.fifo = Queue.Queue(20)
+        self.fifo = Queue.Queue(1)
         threading.Thread.__init__(self)
     
     def getFifo(self):
         return self.fifo
-    
+
     def GSMSendATCommand(self, command):
         self.sr.write(str.encode(command+"\r\n"))
         ret = []
@@ -58,6 +58,7 @@ class Modem(threading.Thread):
             # Retrieve the new SMS in the FIFO
             try:
                 new_sms = self.fifo.get(timeout=1)
+                print 'modem is reading', new_sms
                 # Tell the producer that the job is over
                 self.fifo.task_done()
                 new_sms.queue.put(0)
