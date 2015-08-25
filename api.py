@@ -31,11 +31,11 @@ def auth(dict_query):
         # Check if the password is correct
         if db_user.password == pbdkf2_password:
             # Check if a valid token is present in DB
-            if db_user.token and db_user.expirationDate > datetime.datetime.now():
+            if db_user.token:### and db_user.expirationDate > datetime.datetime.now():
                 pass
             else:
                 db_user.token = binascii.hexlify(os.urandom(16))
-            db_user.expirationDate = datetime.datetime.now() + datetime.timedelta(hours=24)
+            ###db_user.expirationDate = datetime.datetime.now() + datetime.timedelta(hours=24)
             response = json.dumps({'response' : {'status' : 'success', 'token' : db_user.token}}, indent=4)
         else:
             response = json.dumps({'response' : {'status' : 'failed', 'reason' : 'login or password incorrect'}}, indent=4)
@@ -67,18 +67,18 @@ def send(dict_query):
     if not phonenumbers.is_possible_number(obj_number):
         response = json.dumps({'response' : {'status' : 'failed', 'reason' : '\'%s\' is an incorrect phone number' % param_number }}, indent=4)
         return response
-    formated_number = phonenumbers.format_number(obj_number, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
+    formated_number = phonenumbers.format_number(obj_number, phonenumbers.PhoneNumberFormat.E164)
     # Retrieve the token in database
     user_object = User.select(User.q.token == param_token)
     try:
         db_user = user_object.getOne()
-        if db_user.expirationDate > datetime.datetime.now():
-            # Token is valid
-            # Add the job in the scheduler
-            print scheduler.SchedulerAddJob(db_user.login, formated_number, param_message)
-            response = json.dumps({'response' : {'status' : 'success'}}, indent=4)
-        else:
-            response = json.dumps({'response' : {'status' : 'failed', 'reason' : 'expired token'}}, indent=4)
+        ###if db_user.expirationDate > datetime.datetime.now():
+            #### Token is valid
+        # Add the job in the scheduler
+        jobid = scheduler.SchedulerAddJob(db_user.login, formated_number, param_message)
+        response = json.dumps({'response' : {'status' : 'queued', 'jobid' : jobid}}, indent=4)
+        ###else:
+            ###response = json.dumps({'response' : {'status' : 'failed', 'reason' : 'expired token'}}, indent=4)
 
     except sqlobject.SQLObjectIntegrityError as error:
         # We should not have more than one object returned
@@ -144,7 +144,7 @@ if __name__ == '__main__':
     }
 
     modem = Modem('1234')
-    fifo = modem.getFifo()
+    fifo = modem.get_fifo()
     modem.start()
     scheduler = Scheduler(fifo)
     scheduler.start()
