@@ -10,7 +10,7 @@ Python Dependencies :
   - pyserial
 
  TO DO:
-  - finalize the core module which is used to send SMS through API
+  - finalize the api module which is used to send SMS through API
   - write the SMPP module
   - write the SMTP module
   - write the HTTP module
