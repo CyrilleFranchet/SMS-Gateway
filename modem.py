@@ -124,7 +124,7 @@ class Modem(threading.Thread):
                 except TimeoutOnSerial:
                     response = 'failed'
                 else:
-                    response = 'queued'
+                    response = 'sent'
                 finally:
                     # Tell the producer that the job is over
                     self.fifo.task_done()
