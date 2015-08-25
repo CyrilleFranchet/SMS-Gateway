@@ -11,7 +11,7 @@ class User(sqlobject.SQLObject):
     password = sqlobject.StringCol(default=None)
     salt = sqlobject.StringCol(length=10, default=binascii.hexlify(os.urandom(5)))
     token = sqlobject.StringCol(length=32, default=None)
-    expirationDate = sqlobject.DateTimeCol(default=None)
+    ###expirationDate = sqlobject.DateTimeCol(default=None)
 
     def _set_password(self, value):
         if value:
