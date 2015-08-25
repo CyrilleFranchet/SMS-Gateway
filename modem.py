@@ -4,11 +4,15 @@ import serial
 import time
 import threading
 import Queue
+from curses import ascii
 
 from global_var import *
 
+class TimeoutOnSerial(Exception):
+    pass
+
 class Modem(threading.Thread):
-    def GSMWakeUp(self):
+    def gsm_wakeup(self):
         GPIO.output(7,True)
         time.sleep(0.5)
         GPIO.output(7,False)
@@ -23,47 +27,109 @@ class Modem(threading.Thread):
         self.fifo = Queue.Queue(1)
         threading.Thread.__init__(self)
     
-    def getFifo(self):
+    def get_fifo(self):
         return self.fifo
 
-    def GSMSendATCommand(self, command):
-        self.sr.write(str.encode(command+"\r\n"))
+    def gsm_send_AT_command(self, command):
+        if self.debug: print 'Sending AT command', command+'\\r'
+        data = command + '\r'
+        self.sr.write(data.encode('ascii'))
         ret = []
+        orig_time = time.time()
+        while self.sr.inWaiting() == 0:
+            if time.time() - orig_time > 10:
+                raise TimeoutOnSerial('Could not read on serial port')
         while True:
-            msg = self.sr.readline().strip().decode('ascii')
+            msg = self.sr.readline().strip()
+            ret.append(msg)
             if msg != "":
-                ret.append(msg)
                 if msg == 'OK':
                     break
                 elif msg == 'ERROR':
                     break
                 elif msg == '>':
                     break
-        if self.debug: print(command,"output is", ret)
+        if self.debug:
+            print 'Output is'
+            for r in ret:
+                print '\t', repr(r)
         return ret
     
-    def GSMShutdown(self):
-        ret = self.GSMSendATCommand("AT^SMSO")
+    def gsm_shutdown(self):
+        ret = self.gsm_send_AT_command('AT^SMSO')
         for elem in ret:
             if elem == 'OK':
                 return 0
         return 1
     
+    def gsm_is_ready(self):
+        self.sr.write(str.encode('AT\r\n'))
+        ret = []
+        time.sleep(1)
+        while self.sr.inWaiting() > 0:
+            msg = self.sr.readline().strip().decode('ascii')
+            if msg != "":
+                ret.append(msg)
+        if len(ret) > 0 and ret[0] == 'OK':
+            return True
+        else:
+            return False
+
+    def gsm_sms_send(self, number, message):
+        ret = self.gsm_send_AT_command('AT+CMGS="'+number+'",145')
+        if '>' in ret:
+            ret = self.gsm_send_AT_command(message+ascii.ctrl('z'))
+            if 'OK' in ret:
+                return True
+        return False
+
+    def gsm_sms_textmode(self):
+        ret = self.gsm_send_AT_command('AT+CMGF=1')
+        if 'OK' in ret:
+            return True
+        return False
+
+    def gsm_sim_unlock(self, pin):
+        ret = self.gsm_send_AT_command('AT+CPIN='+pin)
+        if len(ret) > 0 and ret[0].startswith('OK'):
+            return False
+        return True
+
+    def gsm_sim_is_locked(self):
+        ret = self.gsm_send_AT_command('AT+CPIN?')
+        if '+CPIN: READY' in ret:
+            return False
+        return True
+
     def run(self):
         if self.debug: print 'Waking up the GSM board'
-        self.GSMWakeUp()
+        self.gsm_wakeup()
+        while not self.gsm_is_ready():
+            time.sleep(1)
+        if self.gsm_sim_is_locked():
+            self.gsm_sim_unlock(self.pin)
         # We need to wait for the modem to start
         time.sleep(3)
         while not self.stop.isSet():
             # Retrieve the new SMS in the FIFO
             try:
                 new_sms = self.fifo.get(timeout=1)
-                print 'modem is reading', new_sms
-                # Tell the producer that the job is over
-                self.fifo.task_done()
-                new_sms.queue.put(0)
             except:
                 pass
+            else:
+                print 'modem is reading', new_sms
+                try:
+                    if self.gsm_sms_textmode():
+                        sms_status = self.gsm_sms_send(new_sms.number, new_sms.message)
+                except TimeoutOnSerial:
+                    response = 'failed'
+                else:
+                    response = 'queued'
+                finally:
+                    # Tell the producer that the job is over
+                    self.fifo.task_done()
+                    new_sms.queue.put(response)
         if self.debug: print 'Shutting down the GSM board'
-        self.GSMShutdown()
+        self.gsm_shutdown()
+        self.sr.close()
         GPIO.cleanup()
