@@ -31,11 +31,10 @@ def auth(dict_query):
         # Check if the password is correct
         if db_user.password == pbdkf2_password:
             # Check if a valid token is present in DB
-            if db_user.token:### and db_user.expirationDate > datetime.datetime.now():
+            if db_user.token:
                 pass
             else:
                 db_user.token = binascii.hexlify(os.urandom(16))
-            ###db_user.expirationDate = datetime.datetime.now() + datetime.timedelta(hours=24)
             response = json.dumps({'response' : {'status' : 'success', 'token' : db_user.token}}, indent=4)
         else:
             response = json.dumps({'response' : {'status' : 'failed', 'reason' : 'login or password incorrect'}}, indent=4)
@@ -72,20 +71,42 @@ def send(dict_query):
     user_object = User.select(User.q.token == param_token)
     try:
         db_user = user_object.getOne()
-        ###if db_user.expirationDate > datetime.datetime.now():
-            #### Token is valid
-        # Add the job in the scheduler
-        jobid = scheduler.SchedulerAddJob(db_user.login, formated_number, param_message)
-        response = json.dumps({'response' : {'status' : 'queued', 'jobid' : jobid}}, indent=4)
-        ###else:
-            ###response = json.dumps({'response' : {'status' : 'failed', 'reason' : 'expired token'}}, indent=4)
-
     except sqlobject.SQLObjectIntegrityError as error:
         # We should not have more than one object returned
         response = json.dumps({'response' : {'status' : 'failed', 'reason' : 'SQLi detected'}}, indent=4)
     except sqlobject.SQLObjectNotFound as error:
         response = json.dumps({'response' : {'status' : 'failed', 'reason' : 'invalid token'}}, indent=4)
+    else:
+        # Add the job in the scheduler
+        jobid = scheduler.SchedulerAddJob(db_user.login, formated_number, param_message)
+        response = json.dumps({'response' : {'status' : 'queued', 'jobid' : jobid}}, indent=4)
+    
+    return response
 
+def job(dict_query):
+    param_token = dict_query['token'][0]
+    try:
+        param_id = int(dict_query['id'][0])
+    except ValueError:
+        response = json.dumps({'response' : {'status' : 'failed', 'reason' : 'invalid id'}}, indent=4)
+        return response
+
+    sqlobject.sqlhub.processConnection = sqlobject.connectionForURI('sqlite://'+DB_PATH)
+    if debug: User._connection.debug = True 
+    # Retrieve the token in database
+    user_object = User.select(User.q.token == param_token)
+    try:
+        db_user = user_object.getOne()
+    except sqlobject.SQLObjectIntegrityError as error:
+        # We should not have more than one object returned
+        response = json.dumps({'response' : {'status' : 'failed', 'reason' : 'SQLi detected'}}, indent=4)
+    except sqlobject.SQLObjectNotFound as error:
+        response = json.dumps({'response' : {'status' : 'failed', 'reason' : 'invalid token'}}, indent=4)
+    else:
+        # Retrieve the job status from the scheduler
+        jobstatus = scheduler.SchedulerGetJob(db_user.login, param_id)
+        response = json.dumps({'response' : {'status' : 'success', 'job_status' : jobstatus, 'jobid' : param_id}}, indent=4)
+    
     return response
 
 # WebServer classes
@@ -140,7 +161,7 @@ if __name__ == '__main__':
     dict_endpoints = {
         '/api/auth' : ('username', 'password'),
         '/api/send' : ('token', 'number', 'message'),
-        '/api/jobs' : ('token', 'id')
+        '/api/job' : ('token', 'id')
     }
 
     modem = Modem('1234')
