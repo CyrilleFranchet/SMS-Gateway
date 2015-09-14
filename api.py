@@ -1,4 +1,6 @@
+#!/usr/bin/env python
 # coding : utf-8
+
 import BaseHTTPServer
 from SocketServer import ThreadingMixIn
 import urlparse
@@ -7,19 +9,22 @@ import json
 import hashlib
 import datetime
 import threading
+import logging
 
 from sms import *
 from user import *
 from modem import *
 from scheduler import *
-from global_var import *
 
 # Define the API endpoints here
 def auth(dict_query):
     param_username = dict_query['username'][0]
     param_password = dict_query['password'][0]
-    sqlobject.sqlhub.processConnection = sqlobject.connectionForURI('sqlite://'+DB_PATH)
-    if debug: User._connection.debug = True 
+    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+        sqlobject.sqlhub.processConnection = sqlobject.connectionForURI('sqlite://'+DB_PATH+'?debug=1&logger='+__name__+'&loglevel=debug')
+    else:
+        sqlobject.sqlhub.processConnection = sqlobject.connectionForURI('sqlite://'+DB_PATH)
+
     # We need to create the tables
     User.createTable(ifNotExists=True)
     
@@ -53,8 +58,12 @@ def send(dict_query):
     param_number = dict_query['number'][0]
     param_token = dict_query['token'][0]
     param_message = dict_query['message'][0]
-    sqlobject.sqlhub.processConnection = sqlobject.connectionForURI('sqlite://'+DB_PATH)
-    if debug: User._connection.debug = True 
+    
+    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+        sqlobject.sqlhub.processConnection = sqlobject.connectionForURI('sqlite://'+DB_PATH+'?debug=1&logger='+__name__+'&loglevel=debug')
+    else:
+        sqlobject.sqlhub.processConnection = sqlobject.connectionForURI('sqlite://'+DB_PATH)
+    
     try:
         obj_number = phonenumbers.parse(param_number, 'FR')
     except phonenumbers.NumberParseException as npe:
@@ -91,8 +100,10 @@ def job(dict_query):
         response = json.dumps({'response' : {'status' : 'failed', 'reason' : 'invalid id'}}, indent=4)
         return response
 
-    sqlobject.sqlhub.processConnection = sqlobject.connectionForURI('sqlite://'+DB_PATH)
-    if debug: User._connection.debug = True 
+    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+        sqlobject.sqlhub.processConnection = sqlobject.connectionForURI('sqlite://'+DB_PATH+'?debug=1&logger='+__name__+'&loglevel=debug')
+    else:
+        sqlobject.sqlhub.processConnection = sqlobject.connectionForURI('sqlite://'+DB_PATH)
     # Retrieve the token in database
     user_object = User.select(User.q.token == param_token)
     try:
@@ -110,7 +121,15 @@ def job(dict_query):
     return response
 
 # WebServer classes
-class ThreadedHTTPServer(ThreadingMixIn, BaseHTTPServer.HTTPServer):
+class MyThreadingMixIn(ThreadingMixIn):
+    def process_request(self, request, client_address):
+        """Start a new thread to process the request."""
+        t = threading.Thread(name = 'APIHTTPClientThread', target = self.process_request_thread,
+                             args = (request, client_address))
+        t.daemon = self.daemon_threads
+        t.start()
+
+class ThreadedHTTPServer(MyThreadingMixIn, BaseHTTPServer.HTTPServer):
     def __init__(self, server_address, RequestHandlerClass, dict_endpoints):
         BaseHTTPServer.HTTPServer.__init__(self, server_address, RequestHandlerClass)
         self.RequestHandlerClass.dict_endpoints = dict_endpoints
@@ -125,6 +144,11 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         BaseHTTPServer.BaseHTTPRequestHandler.__init__(self, request, client_address, server)
         self.dict_endpoints = None
     
+    def log_message(self, format, *args):
+        elems = (self.client_address[0], self.client_address[1]) + args
+        formats = '%s %d '+format
+        logging.info(formats % elems)
+
     def do_GET(self):
         # Parse the request
         uri = urlparse.urlparse(self.path)
@@ -143,7 +167,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         # Check if all endpoint parameters are present
         for param in self.dict_endpoints[path]:
             if param not in dict_query:
-                self.send_response(404)
+                self.send_response(400)
                 self.send_header('Content-type', 'application/json')
                 self.end_headers()
                 response = json.dumps({'response' : {'status' : 'failed', 'reason' : 'missing required argument \'%s\'' % param }}, indent=4)
@@ -158,29 +182,40 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         return
 
 if __name__ == '__main__':
+    threading.current_thread().name = 'APIMainThread'
+    my_format = '%(asctime)s;%(levelname)s;%(threadName)s;%(message)s'
+    logging.basicConfig(filename='api.log', level=logging.DEBUG, format=my_format)
+    logger = logging.getLogger('api')
+
     dict_endpoints = {
         '/api/auth' : ('username', 'password'),
         '/api/send' : ('token', 'number', 'message'),
         '/api/job' : ('token', 'id')
     }
-
     modem = Modem('1234')
     fifo = modem.get_fifo()
-    modem.start()
     scheduler = Scheduler(fifo)
-    scheduler.start()
     server = ThreadedHTTPServer(('192.168.2.9',8080), RequestHandler, dict_endpoints)
+    
+    # Starting the threads
+    logger.info('Starting modem thread')
+    modem.start()
+    logger.info('Starting scheduler thread')
+    scheduler.start()
+    
     try:
-        if debug: print 'Starting API web server'
+        logger.info('Starting webserver')
         server.serve_forever()
     except KeyboardInterrupt:
-        if debug: print 'Stopping modem'
+        logger.info('Asking the modem thread to stop')
         modem.stop.set()
-        if debug: print 'Stopping scheduler'
+        logger.info('Asking the scheduler thread to stop')
         scheduler.stop.set()
-        if debug: print 'Waiting for modem thread to terminate'
+        logger.info('Waiting for the modem thread to stop')
         modem.join()
-        if debug: print 'Waiting for scheduler thread to terminate'
+        logger.info('Modem thread has stopped')
+        logger.info('Waiting for the scheduler thread to stop')
         scheduler.join()
+        logger.info('Scheduler thread has stopped')
     finally:
         pass

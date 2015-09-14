@@ -1,22 +1,25 @@
+#!/usr/bin/env python
 # coding : utf-8
+
 import threading
 import binascii
 import Queue
+import logging
 from collections import OrderedDict
 
 from sms import *
 
-from global_var import *
-
 class Scheduler(threading.Thread):
+    name = 'APISchedulerThread'
+    
     def __init__(self, fifo):
-        self.debug = debug
         self.stop = threading.Event()
         self.dict_jobs_to_procede = OrderedDict()
         self.dict_jobs = {}
         self.id = 0
         self.fifo = fifo
         self.lock = threading.Lock()
+        self.logger = logging.getLogger('api')
         threading.Thread.__init__(self)
 
     def SchedulerAddJob(self, username, number, message):
@@ -27,6 +30,7 @@ class Scheduler(threading.Thread):
         temp_id = self.id
         self.lock.release()
         self.dict_jobs_to_procede[temp_id] = new_sms
+        self.logger.info('Scheduling job id %i to %s from user %s' % (temp_id, number,username))
         return temp_id
 
     def SchedulerGetJob(self, username, id):
@@ -46,15 +50,18 @@ class Scheduler(threading.Thread):
         while not self.stop.isSet():
             if self.dict_jobs_to_procede:
                 id, sms = self.dict_jobs_to_procede.popitem(last=False)
+                self.logger.debug('Running job id %i' % id)
                 self.dict_jobs[id] = [sms.username, 'sending']
-                if self.debug: print 'Sending SMS into FIFO', sms
                 self.fifo.put(sms, True, 5)
                 self.fifo.join()
                 try:
                     modem_response = sms.queue.get(True, 15)
-                except Queue.Empty:
-                    pass
+                    self.logger.info('Job id %i is marked as %s' % (id, modem_response))
+                except:
+                    # Got no response from modem
+                    self.logger.info('Job id %i : no reply from modem' % id)
+                    sms.queue.task_done()
+                    self.dict_jobs[id] = [sms.username, 'unknown']
                 else:
                     sms.queue.task_done()
-                    if self.debug: print 'Scheduler received modem response :', modem_response
                     self.dict_jobs[id] = [sms.username, modem_response]
